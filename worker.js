@@ -1,3 +1,4 @@
+const mytoken = 'xxoo'; //可以随便取，或者uuid生成，https://1024tools.com/uuid
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
@@ -2917,6 +2918,11 @@ var yaml = require_js_yaml();
 var src_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const token = url.searchParams.get('token'); // Get the token from the URL
+    if (token !== mytoken) {
+      //await sendMessage("#Token错误信息", request.headers.get('CF-Connecting-IP'), `Invalid Token: ${token}`);
+      return new Response('Invalid token???', { status: 403 });
+    }
     const host = url.origin;
     const frontendUrl = 'https://raw.githubusercontent.com/bulianglin/psub/main/frontend.html';
     const SUB_BUCKET = env.SUB_BUCKET;
