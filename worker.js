@@ -2924,9 +2924,13 @@ var src_default = {
       return new Response('Invalid token???', { status: 403 });
     }
     const host = url.origin;
-    const frontendUrl = 'https://raw.githubusercontent.com/bulianglin/psub/main/frontend.html';
+    const frontendUrl = 'https://raw.githubusercontent.com/pananfly/psub/main/frontend.html';
     const SUB_BUCKET = env.SUB_BUCKET;
+    const ADD_ARRAY_STRING = "add_array";
+    const ADD_ARRAY_SPLICING = "|";
+    const ADD_KEY_SPLICING = "==";
     let backend = env.BACKEND.replace(/(https?:\/\/[^/]+).*$/, "$1");
+    let urlParam = "";
     const subDir = "subscription";
     const pathSegments = url.pathname.split("/").filter((segment) => segment.length > 0);
     if (pathSegments.length === 0) {
@@ -2935,7 +2939,7 @@ var src_default = {
         return new Response('Failed to fetch frontend', { status: response.status });
       }
       const originalHtml = await response.text();
-      const modifiedHtml = originalHtml.replace(/https:\/\/bulianglin2023\.dev/, host);
+      const modifiedHtml = originalHtml.replace(/https:\/\/bulianglin2023\.dev/, host).replace(/token_placeholder/, token);
       return new Response(modifiedHtml, {
         status: 200,
         headers: {
@@ -2955,9 +2959,121 @@ var src_default = {
         const headers = object_headers ? new Headers(JSON.parse(object_headers)) : new Headers({ "Content-Type": "text/plain;charset=UTF-8" });
         return new Response(object, { headers });
       }
+    } else if (pathSegments[0] === "add") {
+      // const type = url.searchParams.get('type');
+      // const name = url.searchParams.get('name');
+      let type, name, key, parsedObj;
+      const configs = url.searchParams.get('url');
+      if(!configs) {
+        return new Response('Invalid url.', { status: 200 });
+      }
+      
+      let addKeys = [];
+      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      const configParts = configs.split("|").filter((part) => part.trim() !== "");
+      for (const url2 of configParts) {
+        if (url2.startsWith("https://") || url2.startsWith("http://")) {
+          type = "http";
+          name = url2;
+        } else {
+          parsedObj = parseData(url2);
+          if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
+            if(url2.startsWith("vmess://") || url2.startsWith("vmess1://")) {
+              const regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+              type = regexMatch[1];
+              name = url2;
+            } else {
+              const regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
+              type = regexMatch[1];
+              name = regexMatch.length > 2 ? regexMatch[2] : url2;
+            }
+          } else if ("base64" === parsedObj.format) {
+             type = "base64";
+             name = url2;
+          } else if ("yaml" === parsedObj.format) {
+             type = "yaml";
+             name = url2;
+          }
+        }
+        key = name + ADD_KEY_SPLICING + type;
+        addKeys.push(key);
+        await SUB_BUCKET.put(key, url2);
+        arrays = arrays.filter((part) => part.trim() !== key);
+        arrays.push(key);
+        console.log("key: " + key + ", url: " + url2);
+      }
+      await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : arrays[0]);
+      return new Response('Add success size: ' + addKeys.length + ".\r\nkeys: " + addKeys.join('\r\n'), { status: 200 });
+    } else if (pathSegments[0] === "remove") {
+      const isAll = url.searchParams.get('all');      
+      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      if(isAll == "true") {
+        await SUB_BUCKET.delete(ADD_ARRAY_STRING);
+        for(const item of arrays) {
+          await SUB_BUCKET.delete(item);
+        }
+        return new Response('delete all size: ' + arrays.length, { status: 200 });
+      }
+      let type, name, key, parsedObj;
+      const configs = url.searchParams.get('url');
+      if(!configs) {
+        return new Response('Invalid url.', { status: 200 });
+      }
+      let deletKeys = [];
+      const configParts = configs.split("|").filter((part) => part.trim() !== "");
+      for (const url2 of configParts) {
+        if (url2.startsWith("https://") || url2.startsWith("http://")) {
+          type = "http";
+          name = url2;
+        } else {
+          parsedObj = parseData(url2);
+          if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
+            if(url2.startsWith("vmess://") || url2.startsWith("vmess1://")) {
+              const regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+              type = regexMatch[1];
+              name = url2;
+            } else {
+              const regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
+              type = regexMatch[1];
+              name = regexMatch.length > 2 ? regexMatch[2] : url2;
+            }
+          } else if ("base64" === parsedObj.format) {
+             type = "base64";
+             name = url2;
+          } else if ("yaml" === parsedObj.format) {
+             type = "yaml";
+             name = url2;
+          }
+        }
+        key = name + ADD_KEY_SPLICING + type;
+        deletKeys.push(key);
+        await SUB_BUCKET.delete(key);
+        arrays = arrays.filter((part) => part.trim() !== key);
+        // console.log("key: " + key + ", url: " + url2);
+      }
+      await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : (arrays.length == 1 ? arrays[0] : ""));
+      SUB_BUCKET.delete(key)
+      return new Response('delete success size: ' + deletKeys.length + ".\r\nkeys: " + deletKeys.join('\r\n'), { status: 200 });
+    } else if (pathSegments[0] === "get") {
+      // const name = url.searchParams.get('name');
+      // const url = url.searchParams.get('url');
+      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      let params = [];
+      for(const item of arrays) {
+        params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      }
+      urlParam = params.join("|");
+      // 修改为其他后端支持的路径
+      url.pathname = "/sub";
+    } else {
+      urlParam = url.searchParams.get("url");
     }
+    console.log("urlParam: " + urlParam);
 
-    const urlParam = url.searchParams.get("url");
+    // const urlParam = url.searchParams.get("url");
     if (!urlParam)
       return new Response("Missing URL parameter", { status: 400 });
     const backendParam = url.searchParams.get("bd");
@@ -2996,11 +3112,13 @@ var src_default = {
           parsedObj = parseData(plaintextData);
           await SUB_BUCKET.put(key + "_headers", JSON.stringify(Object.fromEntries(response.headers)));
           keys.push(key);
-        } else {
+        }
+         else {
           parsedObj = parseData(url2);
         }
-        if (/^(ssr?|vmess1?|trojan|vless|hysteria):\/\//.test(url2)) {
+        if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
           const newLink = replaceInUri(url2, replacements, false);
+          console.log("newLink: " + newLink);
           if (newLink)
             replacedURIs.push(newLink);
           continue;
@@ -3030,6 +3148,8 @@ var src_default = {
     }
     const newUrl = replacedURIs.join("|");
     url.searchParams.set("url", newUrl);
+    url.searchParams.delete("token");
+    console.log("url: " + url);
     const modifiedRequest = new Request(backend + url.pathname + url.search, request);
     const rpResponse = await fetch(modifiedRequest);
     for (const key of keys) {
@@ -3059,6 +3179,11 @@ var src_default = {
     return rpResponse;
   }
 };
+
+async function getBuketText(file) {
+  return file ? await file.text(): '';
+}
+
 function replaceInUri(link, replacements, isRecovery) {
   switch (true) {
     case link.startsWith("ss://"):
@@ -3070,6 +3195,7 @@ function replaceInUri(link, replacements, isRecovery) {
       return replaceVmess(link, replacements, isRecovery);
     case link.startsWith("trojan://"):
     case link.startsWith("vless://"):
+    case link.startsWith("hysteria2://"):
       return replaceTrojan(link, replacements, isRecovery);
     case link.startsWith("hysteria://"):
       return replaceHysteria(link, replacements);
@@ -3160,12 +3286,14 @@ function replaceSS(link, replacements, isRecovery) {
   const randomDomain = randomPassword + ".com";
   let replacedString;
   let tempLink = link.slice("ss://".length).split("#")[0];
+  console.log("SS tempLink: " + tempLink);
   if (tempLink.includes("@")) {
     const regexMatch1 = tempLink.match(/(\S+?)@(\S+):/);
     if (!regexMatch1) {
       return;
     }
     const [, base64Data, server] = regexMatch1;
+    console.log("SS base64Data: " + base64Data + ", server: " + server);
     const regexMatch2 = urlSafeBase64Decode(base64Data).match(/(\S+?):(\S+)/);
     if (!regexMatch2) {
       return;
@@ -3203,7 +3331,8 @@ function replaceSS(link, replacements, isRecovery) {
 function replaceTrojan(link, replacements, isRecovery) {
   const randomUUID = generateRandomUUID();
   const randomDomain = generateRandomStr(10) + ".com";
-  const regexMatch = link.match(/(vless|trojan):\/\/(.*?)@(.*):/);
+  const regexMatch = link.match(/(vless|trojan|hysteria2):\/\/(.*?)@(.*):/);
+  console.log("Trojan link: " + link + ", match: " + regexMatch);
   if (!regexMatch) {
     return;
   }
@@ -3218,12 +3347,14 @@ function replaceTrojan(link, replacements, isRecovery) {
   }
 }
 function replaceHysteria(link, replacements) {
-  const regexMatch = link.match(/hysteria:\/\/(.*):(.*?)\?/);
+  const regexMatch = link.match(/(hysteria):\/\/(.*):(.*?)\?/);
+  // console.log("Hysteria link: " + link + ", match: " + regexMatch);
   if (!regexMatch) {
     return;
   }
-  const server = regexMatch[1];
+  const server = regexMatch[2];
   const randomDomain = generateRandomStr(12) + ".com";
+  // console.log("Hysteria randomDomain: " + randomDomain);
   replacements[randomDomain] = server;
   return link.replace(server, randomDomain);
 }
