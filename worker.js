@@ -2979,14 +2979,17 @@ var src_default = {
         } else {
           parsedObj = parseData(url2);
           if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
-            if(url2.startsWith("vmess://") || url2.startsWith("vmess1://")) {
-              const regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+            let regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
+            if(regexMatch) {
+              type = regexMatch[1];
+              name = regexMatch[2];
+            } else {
+              regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+              if(!regexMatch) {
+                continue;
+              }
               type = regexMatch[1];
               name = url2;
-            } else {
-              const regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
-              type = regexMatch[1];
-              name = regexMatch.length > 2 ? regexMatch[2] : url2;
             }
           } else if ("base64" === parsedObj.format) {
              type = "base64";
@@ -3030,14 +3033,17 @@ var src_default = {
         } else {
           parsedObj = parseData(url2);
           if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
-            if(url2.startsWith("vmess://") || url2.startsWith("vmess1://")) {
-              const regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+            let regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
+            if(regexMatch) {
+              type = regexMatch[1];
+              name = regexMatch[2];
+            } else {
+              regexMatch = url2.match(/^(.+):\/\/[^#]+$/);
+              if(!regexMatch) {
+                continue;
+              }
               type = regexMatch[1];
               name = url2;
-            } else {
-              const regexMatch = url2.match(/^(.+):\/\/[^#]+#(.+)$/);
-              type = regexMatch[1];
-              name = regexMatch.length > 2 ? regexMatch[2] : url2;
             }
           } else if ("base64" === parsedObj.format) {
              type = "base64";
@@ -3068,10 +3074,20 @@ var src_default = {
       urlParam = params.join("|");
       // 修改为其他后端支持的路径
       url.pathname = "/sub";
+    } else if (pathSegments[0] === "list") {
+      // const name = url.searchParams.get('name');
+      // const url = url.searchParams.get('url');
+      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      let params = [];
+      for(const item of arrays) {
+        params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      }
+      return new Response('sub size: ' + params.length + ".\r\n\r\nlist:\r\n" + params.join('\r\n\r\n'), { status: 200 });
     } else {
       urlParam = url.searchParams.get("url");
     }
-    console.log("urlParam: " + urlParam);
+    // console.log("urlParam: " + urlParam);
 
     // const urlParam = url.searchParams.get("url");
     if (!urlParam)
@@ -3118,7 +3134,7 @@ var src_default = {
         }
         if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
           const newLink = replaceInUri(url2, replacements, false);
-          console.log("newLink: " + newLink);
+          // console.log("newLink: " + newLink);
           if (newLink)
             replacedURIs.push(newLink);
           continue;
@@ -3149,7 +3165,7 @@ var src_default = {
     const newUrl = replacedURIs.join("|");
     url.searchParams.set("url", newUrl);
     url.searchParams.delete("token");
-    console.log("url: " + url);
+    // console.log("url: " + url);
     const modifiedRequest = new Request(backend + url.pathname + url.search, request);
     const rpResponse = await fetch(modifiedRequest);
     for (const key of keys) {
@@ -3286,7 +3302,7 @@ function replaceSS(link, replacements, isRecovery) {
   const randomDomain = randomPassword + ".com";
   let replacedString;
   let tempLink = link.slice("ss://".length).split("#")[0];
-  console.log("SS tempLink: " + tempLink);
+  // console.log("SS tempLink: " + tempLink);
   if (tempLink.includes("@")) {
     const regexMatch1 = tempLink.match(/(\S+?)@(\S+):/);
     if (!regexMatch1) {
@@ -3294,11 +3310,18 @@ function replaceSS(link, replacements, isRecovery) {
     }
     const [, base64Data, server] = regexMatch1;
     console.log("SS base64Data: " + base64Data + ", server: " + server);
-    const regexMatch2 = urlSafeBase64Decode(base64Data).match(/(\S+?):(\S+)/);
-    if (!regexMatch2) {
-      return;
+    let regexMatch, regexMatch2;
+    regexMatch2 = base64Data.match(/(\S+?):(\S+)/);
+    if(regexMatch2) {
+      regexMatch = regexMatch2;
+    } else {
+      regexMatch = urlSafeBase64Decode(base64Data).match(/(\S+?):(\S+)/);
+      if (!regexMatch) {
+        return;
+      }
     }
-    const [, encryption, password] = regexMatch2;
+    const [, encryption, password] = regexMatch;
+    console.log("SS encryption: " + encryption + ", password: " + password);
     if (isRecovery) {
       const newStr = urlSafeBase64Encode(encryption + ":" + replacements[password]);
       replacedString = link.replace(base64Data, newStr).replace(server, replacements[server]);
@@ -3332,7 +3355,7 @@ function replaceTrojan(link, replacements, isRecovery) {
   const randomUUID = generateRandomUUID();
   const randomDomain = generateRandomStr(10) + ".com";
   const regexMatch = link.match(/(vless|trojan|hysteria2):\/\/(.*?)@(.*):/);
-  console.log("Trojan link: " + link + ", match: " + regexMatch);
+  // console.log("Trojan link: " + link + ", match: " + regexMatch);
   if (!regexMatch) {
     return;
   }
