@@ -2926,6 +2926,8 @@ var src_default = {
     const host = url.origin;
     const frontendUrl = 'https://raw.githubusercontent.com/pananfly/psub/main/frontend.html';
     const SUB_BUCKET = env.SUB_BUCKET;
+    const SUB_DB = env.SUB_DATABASE;
+    const SUB_DB_NAME = "sub";
     const ADD_ARRAY_STRING = "add_array";
     const ADD_ARRAY_SPLICING = "|";
     const ADD_KEY_SPLICING = "==";
@@ -2946,20 +2948,22 @@ var src_default = {
           'Content-Type': 'text/html',
         },
       });
-    } else if (pathSegments[0] === subDir) {
-      const key = pathSegments[pathSegments.length - 1];
-      const object = await SUB_BUCKET.get(key);
-      const object_headers = await SUB_BUCKET.get(key + "_headers");
-      if (object === null)
-        return new Response("Not Found", { status: 404 });
-      if ("R2Bucket" === SUB_BUCKET.constructor.name) {
-        const headers = object_headers ? new Headers(await object_headers.json()) : new Headers({ "Content-Type": "text/plain;charset=UTF-8" });
-        return new Response(object.body, { headers });
-      } else {
-        const headers = object_headers ? new Headers(JSON.parse(object_headers)) : new Headers({ "Content-Type": "text/plain;charset=UTF-8" });
-        return new Response(object, { headers });
-      }
-    } else if (pathSegments[0] === "add") {
+    } 
+    // else if (pathSegments[0] === subDir) {
+    //   const key = pathSegments[pathSegments.length - 1];
+    //   const object = await SUB_BUCKET.get(key);
+    //   const object_headers = await SUB_BUCKET.get(key + "_headers");
+    //   if (object === null)
+    //     return new Response("Not Found", { status: 404 });
+    //   if ("R2Bucket" === SUB_BUCKET.constructor.name) {
+    //     const headers = object_headers ? new Headers(await object_headers.json()) : new Headers({ "Content-Type": "text/plain;charset=UTF-8" });
+    //     return new Response(object.body, { headers });
+    //   } else {
+    //     const headers = object_headers ? new Headers(JSON.parse(object_headers)) : new Headers({ "Content-Type": "text/plain;charset=UTF-8" });
+    //     return new Response(object, { headers });
+    //   }
+    // } 
+    else if (pathSegments[0] === "add") {
       // const type = url.searchParams.get('type');
       // const name = url.searchParams.get('name');
       let type, name, key, parsedObj;
@@ -2969,8 +2973,10 @@ var src_default = {
       }
       
       let addKeys = [];
-      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
-      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+
+      // let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      // let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+
       const configParts = configs.split("|").filter((part) => part.trim() !== "");
       for (const url2 of configParts) {
         if (url2.startsWith("https://") || url2.startsWith("http://")) {
@@ -2999,25 +3005,40 @@ var src_default = {
              name = url2;
           }
         }
-        key = name + ADD_KEY_SPLICING + type;
-        addKeys.push(key);
-        await SUB_BUCKET.put(key, url2);
-        arrays = arrays.filter((part) => part.trim() !== key);
-        arrays.push(key);
-        console.log("key: " + key + ", url: " + url2);
-      }
-      await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : arrays[0]);
-      return new Response('Add success size: ' + addKeys.length + ".\r\nkeys: " + addKeys.join('\r\n'), { status: 200 });
-    } else if (pathSegments[0] === "remove") {
-      const isAll = url.searchParams.get('all');      
-      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
-      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
-      if(isAll == "true") {
-        await SUB_BUCKET.delete(ADD_ARRAY_STRING);
-        for(const item of arrays) {
-          await SUB_BUCKET.delete(item);
+        let encode_url = base64Encode(url2);
+        // await SUB_BUCKET.put(key, url2);
+        // arrays = arrays.filter((part) => part.trim() !== key);
+        // arrays.push(key);
+        const { results } = await SUB_DB.prepare('SELECT * FROM ' + SUB_DB_NAME + ' WHERE type = ?1 AND name = ?2;').bind(type, name).all();
+        let success = false;
+        if(!results || results.length <= 0) {
+          const insert_ret = await SUB_DB.prepare('REPLACE INTO ' + SUB_DB_NAME + '(type, name, url) VALUES (?1, ?2, ?3);').bind(type, name, encode_url).run();
+          success = insert_ret && insert_ret.success;
+          // console.log("key: " + key + ", url: " + url2 + ", insert: " + success);
+        } else {
+          const update_ret = await SUB_DB.prepare('UPDATE ' + SUB_DB_NAME + ' SET url= ?1 WHERE type = ?2 AND name = ?3;').bind(encode_url, type, name).run();
+          success = update_ret && update_ret.success;
+          // console.log("key: " + key + ", url: " + url2 + ", update: " + success);
         }
-        return new Response('delete all size: ' + arrays.length, { status: 200 });
+        if(success) {
+          key = name + ADD_KEY_SPLICING + type;
+          addKeys.push(key);
+        }
+        console.log("key: " + key + ", url: " + encode_url + ", success: " + success);
+      }
+      // await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : arrays[0]);
+      return new Response('Add or update success size: ' + addKeys.length + ".\r\nkeys: " + addKeys.join('\r\n'), { status: 200 });
+    } else if (pathSegments[0] === "delete") {
+      const isAll = url.searchParams.get('all');      
+      // let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      // let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      if(isAll == "true") {
+        // await SUB_BUCKET.delete(ADD_ARRAY_STRING);
+        // for(const item of arrays) {
+        //   await SUB_BUCKET.delete(item);
+        // }
+        const delete_ret = await SUB_DB.prepare('DELETE FROM ' + SUB_DB_NAME).run();
+        return new Response('delete all : ' + delete_ret.success, { status: 200 });
       }
       let type, name, key, parsedObj;
       const configs = url.searchParams.get('url');
@@ -3054,34 +3075,46 @@ var src_default = {
           }
         }
         key = name + ADD_KEY_SPLICING + type;
-        deletKeys.push(key);
-        await SUB_BUCKET.delete(key);
-        arrays = arrays.filter((part) => part.trim() !== key);
+        const delete_ret = await SUB_DB.prepare('DELETE FROM ' + SUB_DB_NAME + ' WHERE type = ?1 AND name = ?2;').bind(type, name).run();
+        if(delete_ret && delete_ret.success) {
+          deletKeys.push(key);
+        }
+        // await SUB_BUCKET.delete(key);
+        // arrays = arrays.filter((part) => part.trim() !== key);
         // console.log("key: " + key + ", url: " + url2);
       }
-      await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : (arrays.length == 1 ? arrays[0] : ""));
-      SUB_BUCKET.delete(key)
+      // await SUB_BUCKET.put(ADD_ARRAY_STRING,  arrays.length > 1 ? arrays.join(ADD_ARRAY_SPLICING) : (arrays.length == 1 ? arrays[0] : ""));
       return new Response('delete success size: ' + deletKeys.length + ".\r\nkeys: " + deletKeys.join('\r\n'), { status: 200 });
     } else if (pathSegments[0] === "get") {
       // const name = url.searchParams.get('name');
       // const url = url.searchParams.get('url');
-      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
-      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
       let params = [];
-      for(const item of arrays) {
-        params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      // let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      // let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      // for(const item of arrays) {
+      //   params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      // }
+      const rows = await SUB_DB.prepare('SELECT * FROM ' + SUB_DB_NAME).all();
+      for (let index = 0; index < rows.results.length; index++) {
+        const tableNameRow = rows.results[index];
+        params.push(base64Decode(tableNameRow.url));
       }
       urlParam = params.join("|");
       // 修改为其他后端支持的路径
       url.pathname = "/sub";
     } else if (pathSegments[0] === "list") {
+      let params = [];
       // const name = url.searchParams.get('name');
       // const url = url.searchParams.get('url');
-      let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
-      let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
-      let params = [];
-      for(const item of arrays) {
-        params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      // let value = await getBuketText(await SUB_BUCKET.get(ADD_ARRAY_STRING));
+      // let arrays = value.split(ADD_ARRAY_SPLICING).filter((part) => part.length > 0);
+      // for(const item of arrays) {
+      //   params.push(await getBuketText(await SUB_BUCKET.get(item)));
+      // }
+      const rows = await SUB_DB.prepare('SELECT * FROM ' + SUB_DB_NAME).all();
+      for (let index = 0; index < rows.results.length; index++) {
+        const tableNameRow = rows.results[index];
+        params.push(base64Decode(tableNameRow.url));
       }
       return new Response('sub size: ' + params.length + ".\r\n\r\nlist:\r\n" + params.join('\r\n\r\n'), { status: 200 });
     } else {
@@ -3097,15 +3130,15 @@ var src_default = {
       backend = backendParam.replace(/(https?:\/\/[^/]+).*$/, "$1");
     const replacements = {};
     const replacedURIs = [];
-    const keys = [];
+    // const keys = [];
     if (urlParam.startsWith("proxies:")) {
       const { format, data } = parseData(urlParam.replace(/\|/g, "\r\n"));
       if ("yaml" === format) {
         const key = generateRandomStr(11);
         const replacedYAMLData = replaceYAML(data, replacements);
         if (replacedYAMLData) {
-          await SUB_BUCKET.put(key, replacedYAMLData);
-          keys.push(key);
+          // await SUB_BUCKET.put(key, replacedYAMLData);
+          // keys.push(key);
           replacedURIs.push(`${host}/${subDir}/${key}`);
         }
       }
@@ -3126,8 +3159,8 @@ var src_default = {
             continue;
           const plaintextData = await response.text();
           parsedObj = parseData(plaintextData);
-          await SUB_BUCKET.put(key + "_headers", JSON.stringify(Object.fromEntries(response.headers)));
-          keys.push(key);
+          // await SUB_BUCKET.put(key + "_headers", JSON.stringify(Object.fromEntries(response.headers)));
+          // keys.push(key);
         }
          else {
           parsedObj = parseData(url2);
@@ -3148,15 +3181,15 @@ var src_default = {
           }
           const replacedBase64Data = btoa(newLinks.join("\r\n"));
           if (replacedBase64Data) {
-            await SUB_BUCKET.put(key, replacedBase64Data);
-            keys.push(key);
+            // await SUB_BUCKET.put(key, replacedBase64Data);
+            // keys.push(key);
             replacedURIs.push(`${host}/${subDir}/${key}`);
           }
         } else if ("yaml" === parsedObj.format) {
           const replacedYAMLData = replaceYAML(parsedObj.data, replacements);
           if (replacedYAMLData) {
-            await SUB_BUCKET.put(key, replacedYAMLData);
-            keys.push(key);
+            // await SUB_BUCKET.put(key, replacedYAMLData);
+            // keys.push(key);
             replacedURIs.push(`${host}/${subDir}/${key}`);
           }
         }
@@ -3168,9 +3201,9 @@ var src_default = {
     // console.log("url: " + url);
     const modifiedRequest = new Request(backend + url.pathname + url.search, request);
     const rpResponse = await fetch(modifiedRequest);
-    for (const key of keys) {
-      await SUB_BUCKET.delete(key);
-    }
+    // for (const key of keys) {
+    //   await SUB_BUCKET.delete(key);
+    // }
     if (rpResponse.status === 200) {
       const plaintextData = await rpResponse.text();
       try {
@@ -3309,7 +3342,7 @@ function replaceSS(link, replacements, isRecovery) {
       return;
     }
     const [, base64Data, server] = regexMatch1;
-    console.log("SS base64Data: " + base64Data + ", server: " + server);
+    // console.log("SS base64Data: " + base64Data + ", server: " + server);
     let regexMatch, regexMatch2;
     regexMatch2 = base64Data.match(/(\S+?):(\S+)/);
     if(regexMatch2) {
@@ -3321,7 +3354,7 @@ function replaceSS(link, replacements, isRecovery) {
       }
     }
     const [, encryption, password] = regexMatch;
-    console.log("SS encryption: " + encryption + ", password: " + password);
+    // console.log("SS encryption: " + encryption + ", password: " + password);
     if (isRecovery) {
       const newStr = urlSafeBase64Encode(encryption + ":" + replacements[password]);
       replacedString = link.replace(base64Data, newStr).replace(server, replacements[server]);
@@ -3404,6 +3437,12 @@ function replaceYAML(yamlObj, replacements) {
     }
   });
   return yaml.dump(yamlObj);
+}
+function base64Encode(input) {
+  return btoa(encodeURIComponent(input));
+}
+function base64Decode(input) {
+  return decodeURIComponent(atob(input));
 }
 function urlSafeBase64Encode(input) {
   return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
